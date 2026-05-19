@@ -1,104 +1,557 @@
-# Reddit Clone App on Kubernetes with Ingress and Monitoring
-This project demonstrates how to deploy a Reddit clone app on Kubernetes with Ingress and expose it to the world using Minikube as the cluster.
-Below is an overview of the architecture of this Reddit Clone App running on Kubernetes with Ingress.
+# Reddit Clone Deployment on AWS EKS with ALB, Prometheus & Grafana
 
-## Prerequisites
-Before you begin, you should have the following tools installed on your local machine: 
+## Project Overview
 
+This project demonstrates a complete DevOps workflow where a containerized Reddit Clone application is deployed on an Amazon EKS Cluster using Kubernetes manifests. The cluster is integrated with AWS Application Load Balancer (ALB) Ingress Controller for external access and monitored using Prometheus and Grafana.
+
+Additionally, a CI/CD pipeline is implemented using GitHub Actions to automate Docker image build, push, and Kubernetes deployment.
+
+---
+
+# Technologies Used
+
+- AWS EC2
+- AWS EKS
+- Kubernetes
 - Docker
-- Minikube cluster ( Running )
+- DockerHub
+- Helm
+- AWS Load Balancer Controller (ALB)
+- Prometheus
+- Grafana
+- GitHub Actions
 - kubectl
-- Git
+- eksctl
+- AWS CLI
 
+---
 
+# Architecture
 
-## Installation
-Follow these steps to install and run the Reddit clone app on your local machine:
+```text
+GitHub Repository
+        ↓
+GitHub Actions CI/CD
+        ↓
+Docker Build & Push to DockerHub
+        ↓
+Amazon EKS Cluster
+        ↓
+Kubernetes Deployment + Service + Ingress
+        ↓
+AWS Application Load Balancer (ALB)
+        ↓
+Reddit Clone Application
+        ↓
+Prometheus + Grafana Monitoring
+```
 
-1) Clone this repository to your local machine: `git clone https://github.com/LondheShubham153/reddit-clone-k8s-ingress.git`
-2) Navigate to the project directory: `cd reddit-clone-k8s-ingress`
-3) Build the Docker image for the Reddit clone app: `docker build -t reddit-clone-app .`
-4) Deploy the app to Kubernetes: `kubectl apply -f deployment.yaml`
-1) Deploy the Service for deployment to Kubernetes: `kubectl apply -f service.yaml`
-5) Enable Ingress by using Command: `minikube addons enable ingress`
-6) Expose the app as a Kubernetes service: `kubectl expose deployment reddit-deployment --type=NodePort --port=5000`
-7) Create an Ingress resource: `kubectl apply -f ingress.yaml`
+---
 
+# Project Structure
 
-## Test Ingress DNS for the app:
-- Test Ingress by typing this command: `curl http://domain.com/test`
+```text
+.
+├── .github/
+│   └── workflows/
+│       └── cicd.yml
+│
+├── kubernetes/
+│   ├── deployment.yml
+│   ├── service.yml
+│   └── ingress.yml
+│
+├── screenshots/
+│
+├── Dockerfile
+└── README.md
+```
 
-## Cluster Monitoring using Prometheus & Grafana
+---
 
-Key Components :
+# Step 1 - Launch EC2 Management Instance
 
-- Prometheus server - Processes and stores metrics data
-- Alert Manager - Sends alerts to any systems/channels
-- Grafana - Visualize scraped data in UI
+- Launch Ubuntu EC2 instance
+- Attach IAM Role with AdministratorAccess (For learning purpose only)
+- Connect to instance
 
-Pre Requisites :
-- EKS Cluster is setup already
-- Install Helm
-- EC2 instance to access EKS cluster
+---
 
-Installation Steps 
-```sh
-helm repo add stable https://charts.helm.sh/stable
+# Step 2 - Install Required Tools
+
+## Update Packages
+
+```bash
+sudo apt-get update -y 
+```
+
+---
+
+## Install AWS CLI
+
+```bash
+curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+
+sudo apt install unzip -y
+
+unzip awscliv2.zip
+
+sudo ./aws/install
+```
+
+Verify:
+
+```bash
+aws --version
+```
+
+---
+
+## Install kubectl
+
+```bash
+curl -LO "https://dl.k8s.io/release/$(curl -L -s \
+https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+
+chmod +x kubectl
+
+sudo mv kubectl /usr/local/bin/
+```
+
+Verify:
+
+```bash
+kubectl version --client
+```
+
+---
+
+## Install eksctl
+
+```bash
+curl --silent --location \
+"https://github.com/weaveworks/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz" \
+| tar xz -C /tmp
+
+sudo mv /tmp/eksctl /usr/local/bin
+```
+
+Verify:
+
+```bash
+eksctl version
+```
+
+---
+
+## Install Helm
+
+```bash
+curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+```
+
+Verify:
+
+```bash
+helm version
+```
+
+---
+
+# Step 3 - Create EKS Cluster
+
+```bash
+eksctl create cluster \
+--name my-eks-cluster \
+--region ap-south-1 \
+--nodegroup-name my-nodes \
+--node-type c7i-flex.large \
+--nodes 2 \
+--managed
+```
+
+---
+
+# Step 4 - Configure kubectl for EKS
+
+```bash
+aws eks update-kubeconfig \
+--region ap-south-1 \
+--name my-eks-cluster
+```
+
+Verify:
+
+```bash
+kubectl get nodes
+```
+
+---
+
+# Step 5 - Configure OIDC Provider
+
+```bash
+eksctl utils associate-iam-oidc-provider \
+--region ap-south-1 \
+--cluster my-eks-cluster \
+--approve
+```
+
+---
+
+# Step 6 - Install AWS Load Balancer Controller
+
+## Download IAM Policy
+
+```bash
+curl -O https://raw.githubusercontent.com/kubernetes-sigs/aws-load-balancer-controller/main/docs/install/iam_policy.json
+```
+
+---
+
+## Create IAM Policy
+
+```bash
+aws iam create-policy \
+--policy-name AWSLoadBalancerControllerIAMPolicy \
+--policy-document file://iam_policy.json
+```
+
+---
+
+## Create IAM Service Account
+
+```bash
+eksctl create iamserviceaccount \
+  --cluster=my-eks-cluster \
+  --namespace=kube-system \
+  --name=aws-load-balancer-controller \
+  --role-name AmazonEKSLoadBalancerControllerRole \
+  --attach-policy-arn=arn:aws:iam::<ACCOUNT_ID>:policy/AWSLoadBalancerControllerIAMPolicy \
+  --approve
+```
+
+---
+
+## Add Helm Repo
+
+```bash
+helm repo add eks https://aws.github.io/eks-charts
+```
+
+```bash
+helm repo update
+```
+
+---
+
+## Install ALB Controller
+
+```bash
+helm install aws-load-balancer-controller eks/aws-load-balancer-controller \
+  -n kube-system \
+  --set clusterName=my-eks-cluster \
+  --set serviceAccount.create=false \
+  --set serviceAccount.name=aws-load-balancer-controller \
+  --set region=ap-south-1 \
+  --set vpcId=<VPC_ID>
+```
+
+Verify:
+
+```bash
+kubectl get deployment -n kube-system aws-load-balancer-controller
+```
+
+---
+
+# Step 7 - Clone Reddit Clone Repository
+
+```bash
+git clone https://github.com/dhruvgoe/Reddit-Clone-EKS-ALB-Monitoring.git
+```
+
+```bash
+cd Reddit-Clone-EKS-ALB-Monitoring
+```
+
+---
+
+# Step 8 - Deploy Application
+
+## Create Namespace
+
+```bash
+kubectl create namespace reddit
+```
+
+---
+
+## Deploy Resources
+
+```bash
+kubectl apply -f deployment.yml -n reddit
+```
+
+```bash
+kubectl apply -f service.yml -n reddit
+```
+
+```bash
+kubectl apply -f ingress.yml -n reddit
+```
+
+---
+
+## Verify Deployment
+
+```bash
+kubectl get pods -n reddit
+```
+
+```bash
+kubectl get svc -n reddit
+```
+
+```bash
+kubectl get ingress -n reddit
+```
+
+---
+
+# Step 9 - Access Application
+
+Get ALB DNS:
+
+```bash
+kubectl get ingress -n reddit
+```
+
+Open:
+
+```text
+http://<ALB-DNS>
+```
+
+---
+
+# Step 10 - Install Prometheus & Grafana
+
+## Add Helm Repo
+
+```bash
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-helm search repo prometheus-community
-kubectl create namespace prometheus
-helm install stable prometheus-community/kube-prometheus-stack -n prometheus
-kubectl get pods -n prometheus
-kubectl get svc -n prometheus
 ```
 
-Edit Prometheus Service (Edit type : LoadBalancer)
-```sh
-kubectl edit svc stable-kube-prometheus-sta-prometheus -n prometheus
+```bash
+helm repo update
 ```
 
-Edit Grafana Service (Edit type : LoadBalancer) 
-```sh
-kubectl edit svc stable-grafana -n prometheus
+---
+
+## Install kube-prometheus-stack
+
+```bash
+helm install monitoring prometheus-community/kube-prometheus-stack \
+-n monitoring \
+--create-namespace
 ```
 
-Verify if service is changed to LoadBalancer and also to get the Load Balancer URL.
-```sh
-kubectl get svc -n prometheus
+---
+
+## Verify Monitoring Pods
+
+```bash
+kubectl get pods -n monitoring
 ```
 
-Access Grafana Dashboard
-```sh
-UserName: admin 
-Password: prom-operator
+---
+
+# Step 11 - Access Grafana
+
+## Get Grafana Password
+
+```bash
+kubectl get secret monitoring-grafana \
+-n monitoring \
+-o jsonpath="{.data.admin-password}" | base64 --decode
 ```
 
+---
 
-For creating a dashboard to monitor the cluster:
+## Port Forward Grafana
 
-```sh
-Click '+' button on left panel and select ‘Import’.
-Enter 12740 dashboard id under Grafana.com Dashboard.
-Click ‘Load’.
-Select ‘Prometheus’ as the endpoint under prometheus data sources drop down.
-Click ‘Import’.
+```bash
+kubectl port-forward svc/monitoring-grafana 3000:80 -n monitoring
 ```
 
+Open:
 
-### Images For reference
+```text
+http://localhost:3000
+```
 
+Credentials:
 
+```text
+Username: admin
+Password: <output-from-command>
+```
 
-<img width="1396" alt="image" src="https://user-images.githubusercontent.com/110477025/227587553-7163c709-85cf-4e23-a00b-823b08758859.png">
+---
 
+# Step 12 - Configure CI/CD with GitHub Actions
 
+## GitHub Secrets Used
 
-<img width="1400" alt="image" src="https://user-images.githubusercontent.com/110477025/227587788-06ce33dd-3a09-4f36-9bbd-aff0925615ed.png">
+| Secret Name | Description |
+|---|---|
+| AWS_ACCESS_KEY_ID | AWS Access Key |
+| AWS_SECRET_ACCESS_KEY | AWS Secret Key |
+| AWS_REGION | AWS Region |
+| EKS_CLUSTER_NAME | EKS Cluster Name |
+| DOCKER_USERNAME | DockerHub Username |
+| DOCKER_PASSWORD | DockerHub Access Token |
 
+---
 
+# GitHub Actions Workflow
 
+Create:
 
-## Contributing
-If you'd like to contribute to this project, please open an issue or submit a pull request.
+```text
+.github/workflows/deploy.yml
+```
 
+---
 
+## Workflow File
+
+```yaml
+name: Deploy Reddit Clone to EKS
+
+on: workflow_dispatch
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    - name: Configure AWS Credentials
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+        aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        aws-region: ${{ secrets.AWS_REGION }}
+
+    - name: Login to DockerHub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+
+    - name: Build Docker Image
+      run: |
+        docker build -t <DOCKER_USERNAME>/reddit-clone:latest .
+
+    - name: Push Docker Image
+      run: |
+        docker push <DOCKER_USERNAME>/reddit-clone:latest
+
+    - name: Install kubectl
+      uses: azure/setup-kubectl@v4
+
+    - name: Update kubeconfig
+      run: |
+        aws eks update-kubeconfig \
+        --region ${{ secrets.AWS_REGION }} \
+        --name ${{ secrets.EKS_CLUSTER_NAME }}
+
+    - name: Deploy to EKS
+      run: |
+        kubectl apply --validate=false -f kubernetes/
+        kubectl rollout restart deployment reddit-deployment
+```
+
+---
+
+# Skills Demonstrated
+
+- Kubernetes Administration
+- Amazon EKS
+- AWS ALB Ingress Controller
+- Docker Containerization
+- CI/CD Automation
+- GitHub Actions
+- Infrastructure Monitoring
+- Prometheus & Grafana
+- Helm Package Management
+- Kubernetes Networking
+- IAM & OIDC Integration
+- Cloud Infrastructure Management
+
+---
+
+# Future Improvements
+
+- Terraform for Infrastructure Provisioning
+- HTTPS using ACM
+- Route53 Custom Domain
+- Horizontal Pod Autoscaler (HPA)
+- ArgoCD GitOps
+- Amazon ECR Integration
+- Blue-Green Deployment
+- Jenkins Pipeline
+
+---
+
+# Cleanup Commands
+
+## Delete Application
+
+```bash
+kubectl delete -f kubernetes/
+```
+
+---
+
+## Delete Monitoring Stack
+
+```bash
+helm uninstall monitoring -n monitoring
+```
+
+```bash
+kubectl delete namespace monitoring
+```
+
+---
+
+## Delete EKS Cluster
+
+```bash
+eksctl delete cluster \
+--name my-eks-cluster \
+--region ap-south-1
+```
+
+---
+
+# Conclusion
+
+This project demonstrates a complete production-style Kubernetes deployment pipeline on AWS using EKS, ALB Ingress Controller, Prometheus, Grafana, and GitHub Actions CI/CD.
+
+The project covers:
+- Infrastructure provisioning
+- Kubernetes deployment
+- Application exposure using ALB
+- Monitoring implementation
+- CI/CD automation
+- Cloud-native DevOps practices
+
+### Dhruv Goel
+Cloud | AWS | DevOps
