@@ -26,11 +26,11 @@ jobs:
 
     - name: Build Docker Image
       run: |
-        docker build -t dhruvgoe/reddit-clone:latest .
+        docker build -t dhruvgoel1/reddit-clone:latest .
 
     - name: Push Docker Image
       run: |
-        docker push dhruvgoe/reddit-clone:latest
+        docker push dhruvgoel1/reddit-clone:latest
 
     - name: Install kubectl
       uses: azure/setup-kubectl@v4
